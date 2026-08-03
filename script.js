@@ -8,6 +8,32 @@ const ASSETS = {
   v2Large: 'assets/gemini-v2-alpha-96.png',
 };
 
+// 物理模型閘門（移植自 gemini-web `src/watermark.py`）。
+//
+// 原本只有 NCC 樣板比對：把 96×96 區塊的灰階跟星形樣板算相關係數。乾淨背景很準，
+// 但浮水印壓在 logo、格線這類高對比圖案上時，那些跟星形無關的強邊會把相關係數整個
+// 拉低 → 漏判。實測一張 VTuber 設定表：對比度 25.5（門檻 1.4 的 18 倍，星星很明顯）
+// 但 NCC 只有 0.35，低於 0.42 直接被判定「沒有浮水印」。漏判比誤判糟，因為使用者
+// 會以為圖是乾淨的就拿去用。
+//
+// 補上 Python 版那兩關：
+//   1. 物理模型 — 解 obs = k·α·255 + (1−k·α)·bg。模型正確時 k 應該 ≈ 1。
+//   2. 輪廓能量救援 — 背景估不準（R² 低）時改比較「移除前後星形輪廓上的邊緣能量」。
+//      有浮水印時移除會讓輪廓能量下降；沒有浮水印時等於憑空刻一顆星，能量反而上升。
+//      這條不需要估背景，所以星壓在材質交界上仍然可靠。
+// 門檻沿用 Python 版（該版以 39 張實圖 + 117 個無浮水印角落校準：召回 25/27、誤判 0）。
+const PHYS = {
+  kMain: [0.70, 1.35],
+  r2Min: 0.45,
+  rmsMin: 2.0,
+  kRescue: [0.50, 1.60],
+  contourMax: 0.85,
+  edgeMin: 5.0,
+  // ponytail: 背景用擴散填補（Laplace 補洞）取代 cv2.inpaint，省掉一包 OpenCV.js。
+  // 輪次要夠：96×96 的星區補 240 輪才收斂，太少會把背景估成接近全黑。
+  fillIterations: 240,
+};
+
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 const singlePreview = document.getElementById('singlePreview');
@@ -143,6 +169,142 @@ class WatermarkEngine {
     return { ncc, contrast, score: ncc + strength, alpha };
   }
 
+  // canonical 幾何：星心固定在 (w−120s, h−120s)，尺寸 48s，s = 短邊 ≥1536 ? 2 : 1。
+  // 跟 gemini-web 的 Python 版同一組公式，物理閘門只在這個位置判（不搜位置）。
+  canonicalCandidate(width, height) {
+    const scale = Math.min(width, height) >= 1536 ? 2 : 1;
+    if (Math.min(width, height) < 240 * scale) return null; // 圖太小，幾何先驗不成立
+    const size = 48 * scale;
+    const x = Math.round(width - 120 * scale - size / 2);
+    const y = Math.round(height - 120 * scale - size / 2);
+    if (x < 0 || y < 0 || x + size > width || y + size > height) return null;
+    return { profile: 'v2', size, x, y };
+  }
+
+  readGray(imageData, width, candidate) {
+    const { x, y, size } = candidate;
+    const gray = new Float32Array(size * size);
+    for (let row = 0; row < size; row += 1) {
+      for (let col = 0; col < size; col += 1) {
+        const index = ((y + row) * width + x + col) * 4;
+        gray[row * size + col] =
+          (imageData.data[index] + imageData.data[index + 1] + imageData.data[index + 2]) / 3;
+      }
+    }
+    return gray;
+  }
+
+  // 星區當成未知，反覆用已知鄰居平均往內補，得到背景估計。
+  // 未知處要用「已知像素的平均」當初值：初值給 0 的話中心要幾百輪才擴散得到，
+  // 提早收工會把背景估成接近全黑，k 直接翻倍、rms 爆掉（實測 k=2.16、rms=140）。
+  estimateBackground(gray, alpha, size) {
+    const known = new Uint8Array(size * size);
+    const bg = Float32Array.from(gray);
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < known.length; i += 1) {
+      known[i] = alpha[i] <= 0.02 ? 1 : 0;
+      if (known[i]) { sum += gray[i]; count += 1; }
+    }
+    const seed = count ? sum / count : 0;
+    for (let i = 0; i < known.length; i += 1) if (!known[i]) bg[i] = seed;
+    const next = new Float32Array(size * size);
+    for (let iteration = 0; iteration < PHYS.fillIterations; iteration += 1) {
+      next.set(bg);
+      for (let row = 0; row < size; row += 1) {
+        for (let col = 0; col < size; col += 1) {
+          const i = row * size + col;
+          if (known[i]) continue;
+          let sum = 0;
+          let count = 0;
+          if (col > 0) { sum += bg[i - 1]; count += 1; }
+          if (col < size - 1) { sum += bg[i + 1]; count += 1; }
+          if (row > 0) { sum += bg[i - size]; count += 1; }
+          if (row < size - 1) { sum += bg[i + size]; count += 1; }
+          if (count) next[i] = sum / count;
+        }
+      }
+      bg.set(next);
+    }
+    return bg;
+  }
+
+  // 解 obs = k·α·255 + (1−k·α)·bg，回傳 k / R² / rms。
+  // 灰階解與逐通道解等價（浮水印是白色，三通道同一個 k），所以只跑一次。
+  fitPhysical(imageData, width, candidate) {
+    const { size } = candidate;
+    const alpha = this.getTemplate('v2', size);
+    const gray = this.readGray(imageData, width, candidate);
+    const bg = this.estimateBackground(gray, alpha, size);
+    const u = [];
+    const d = [];
+    for (let i = 0; i < alpha.length; i += 1) {
+      if (alpha[i] <= 0.02) continue;
+      u.push(alpha[i] * (255 - bg[i]));
+      d.push(gray[i] - bg[i]);
+    }
+    if (!u.length) return null;
+    let numerator = 0;
+    let denominator = 0;
+    let ssTotal = 0;
+    for (let i = 0; i < u.length; i += 1) {
+      numerator += d[i] * u[i];
+      denominator += u[i] * u[i];
+      ssTotal += d[i] * d[i];
+    }
+    if (denominator < 1e-6) return null;
+    const k = numerator / denominator;
+    let residual = 0;
+    for (let i = 0; i < u.length; i += 1) {
+      const error = d[i] - k * u[i];
+      residual += error * error;
+    }
+    return {
+      k,
+      r2: 1 - residual / (ssTotal + 1e-6),
+      rms: Math.sqrt(ssTotal / u.length),
+    };
+  }
+
+  sobelMagnitude(src, size) {
+    const out = new Float32Array(size * size);
+    for (let row = 1; row < size - 1; row += 1) {
+      for (let col = 1; col < size - 1; col += 1) {
+        const i = row * size + col;
+        const gx = -src[i - size - 1] - 2 * src[i - 1] - src[i + size - 1]
+          + src[i - size + 1] + 2 * src[i + 1] + src[i + size + 1];
+        const gy = -src[i - size - 1] - 2 * src[i - size] - src[i - size + 1]
+          + src[i + size - 1] + 2 * src[i + size] + src[i + size + 1];
+        out[i] = Math.abs(gx) + Math.abs(gy);
+      }
+    }
+    return out;
+  }
+
+  // 星形輪廓上的邊緣能量：移除前 eb，移除後/前的比值 ratio。不需要估背景。
+  contourEnergy(imageData, width, candidate) {
+    const { size } = candidate;
+    const alpha = this.getTemplate('v2', size);
+    const gray = this.readGray(imageData, width, candidate);
+    const restored = new Float32Array(size * size);
+    for (let i = 0; i < gray.length; i += 1) {
+      const opacity = Math.min(alpha[i] * 1.01, 0.99);
+      restored[i] = opacity < 0.012
+        ? gray[i]
+        : Math.max(0, Math.min(255, (gray[i] - 255 * opacity) / (1 - opacity)));
+    }
+    const alphaEdges = this.sobelMagnitude(alpha, size);
+    const sorted = Array.from(alphaEdges).sort((a, b) => a - b);
+    const threshold = sorted[Math.floor(sorted.length * 0.88)];
+    const band = [];
+    for (let i = 0; i < alphaEdges.length; i += 1) if (alphaEdges[i] > threshold) band.push(i);
+    if (band.length < 8) return null;
+    const meanOver = (field) => band.reduce((sum, i) => sum + field[i], 0) / band.length;
+    const before = meanOver(this.sobelMagnitude(gray, size));
+    const after = meanOver(this.sobelMagnitude(restored, size));
+    return { ratio: after / (before + 1e-6), eb: before };
+  }
+
   detect(imageData, width, height) {
     let best = null;
     for (const candidate of this.getCandidates(width, height)) {
@@ -150,8 +312,24 @@ class WatermarkEngine {
       if (!result) continue;
       if (!best || result.score > best.score) best = { ...candidate, ...result };
     }
-    if (!best || best.ncc < 0.42 || best.contrast < 1.4) return null;
-    return best;
+    if (best && best.ncc >= 0.42 && best.contrast >= 1.4) return { ...best, via: 'ncc' };
+
+    // NCC 沒過 → 用物理模型在 canonical 位置再判一次。背景花的圖靠這兩關救回來。
+    const canonical = this.canonicalCandidate(width, height);
+    if (!canonical) return null;
+    const fit = this.fitPhysical(imageData, width, canonical);
+    if (!fit) return null;
+    const alpha = this.getTemplate('v2', canonical.size);
+    if (fit.k >= PHYS.kMain[0] && fit.k <= PHYS.kMain[1]
+      && fit.r2 >= PHYS.r2Min && fit.rms >= PHYS.rmsMin) {
+      return { ...canonical, alpha, ...fit, via: 'model' };
+    }
+    const contour = this.contourEnergy(imageData, width, canonical);
+    if (contour && fit.k >= PHYS.kRescue[0] && fit.k <= PHYS.kRescue[1]
+      && contour.ratio <= PHYS.contourMax && contour.eb >= PHYS.edgeMin) {
+      return { ...canonical, alpha, ...fit, ...contour, via: 'contour' };
+    }
+    return null;
   }
 
   restore(imageData, width, height, detection) {
@@ -187,6 +365,8 @@ class WatermarkEngine {
 }
 
 const engine = new WatermarkEngine();
+// 測試掛勾：tests/regression.mjs 直接打 engine.detect()，不用穿過整個 UI 流程。
+window.watermarkEngine = engine;
 const engineReady = engine.load().catch((error) => {
   console.error('清理模板載入失敗', error);
   return null;
