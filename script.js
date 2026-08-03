@@ -205,15 +205,15 @@ function setStatus(message, isError = false) {
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '未知大小';
   if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
+  const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
-  let unit = units[0];
-  for (let index = 0; value >= 1024 && index < units.length - 1; index += 1) {
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
     value /= 1024;
-    unit = units[index + 1];
+    unitIndex += 1;
   }
-  const digits = value >= 10 || unit === 'KB' ? 0 : 1;
-  return `${value.toFixed(digits)} ${unit}`;
+  const digits = unitIndex === 0 || value >= 10 || unitIndex === 1 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
 }
 
 function formatType(file) {
@@ -413,10 +413,10 @@ async function processSingle(item, runId) {
     processedName.textContent = `cleaned_${baseName(item.file.name)}.png`;
     processedName.title = processedName.textContent;
     processedInfo.textContent = formatProcessedInfo(item);
-    processedStatus.textContent = result.removed ? '已整理可見水印' : '未偵測到水印';
+    processedStatus.textContent = result.removed ? '已整理 Gemini 水印' : '未偵測到 Gemini 水印';
     downloadSingleBtn.classList.remove('is-hidden');
     processedSection.classList.remove('is-hidden');
-    setStatus(result.removed ? '完成：只在圖片的星形水印區域做像素整理。' : '這張圖片沒有偵測到可見的星形水印，已保留原圖。');
+    setStatus(result.removed ? '完成：只在圖片的 Gemini 星形水印區域做像素整理。' : '未偵測到 Gemini 星形水印，已保留原圖；圖片內其他文字或標誌不在處理範圍。');
   } catch (error) {
     if (!isCurrent()) return;
     console.error(error);
@@ -442,7 +442,7 @@ async function processBatch(items, runId) {
       const image = row?.querySelector('img');
       if (image) image.src = item.processedUrl;
       if (item.batchMeta) item.batchMeta.textContent = `${formatDimensions(item.width, item.height)} · ${formatType(item.file)} ${formatBytes(item.file.size)} → PNG ${formatBytes(item.blob.size)}`;
-      setBatchStatus(item, item.removed ? '完成：已整理可見水印' : '完成：未偵測到可見水印', true);
+      setBatchStatus(item, item.removed ? '完成：已整理 Gemini 水印' : '完成：未偵測到 Gemini 水印', true);
     } else {
       setBatchStatus(item, '處理失敗');
     }
