@@ -1,4 +1,4 @@
-# 洗圖間｜Gemini 圖片清理工具
+# 圖個清白｜Gemini 圖片清理工具
 
 「把圖留給你，水印交給我。」
 
@@ -37,7 +37,7 @@ original = (watermarked - alpha × 255) / (1 - alpha)
 
 ## 相關連結
 
-- [LINE 實作營](https://yazelin.github.io/j303/)
+- [LINE 實作營](https://yazelin.github.io/events/)
 - [林亞澤 GitHub](https://github.com/yazelin)
 - [Facebook](https://www.facebook.com/yaze.lin.gm)
 - [Buy Me a Coffee](https://buymeacoffee.com/yazelin)

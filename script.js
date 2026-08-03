@@ -1,4 +1,4 @@
-/* 洗圖間：純瀏覽器端 Gemini 可見浮水印清理工具。 */
+/* 圖個清白：純瀏覽器端 Gemini 可見浮水印清理工具。 */
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -441,3 +441,52 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeModal();
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') openModal(state.modalMode === 'original' ? 'processed' : 'original');
 });
+
+// Footer 三件套中的 Buy Me a Coffee 輕提示：不攔截操作，最多出現三次。
+const footerCoffee = document.querySelector('.footer-social-bmc');
+const promoLines = [
+  '嘿，這裡這裡，我是咖啡按鈕',
+  '我是一顆很努力的按鈕，求被點一下',
+  '一杯咖啡，是下一個作品的燃料',
+  '覺得好玩嗎？抖內一下下',
+  '這個網站沒有廣告，只有我這顆按鈕',
+];
+let promoBubble;
+let promoShown = 0;
+
+function showPromoBubble() {
+  if (!footerCoffee || document.hidden || promoShown >= 3) return;
+  const rect = footerCoffee.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+  if (!promoBubble) {
+    promoBubble = document.createElement('div');
+    promoBubble.className = 'yz-bubble';
+    promoBubble.setAttribute('role', 'status');
+    document.body.appendChild(promoBubble);
+  }
+  const bubbleWidth = Math.min(260, window.innerWidth - 28);
+  const left = Math.max(14, Math.min(window.innerWidth - bubbleWidth - 14, rect.left + rect.width / 2 - bubbleWidth / 2));
+  const above = rect.top > 82;
+  promoBubble.textContent = promoLines[Math.floor(Math.random() * promoLines.length)];
+  promoBubble.classList.remove('yz-on', 'yz-above', 'yz-below');
+  promoBubble.classList.add(above ? 'yz-above' : 'yz-below');
+  promoBubble.style.left = `${left}px`;
+  promoBubble.style.width = `${bubbleWidth}px`;
+  promoBubble.style.top = `${above ? rect.top - 13 : rect.bottom + 13}px`;
+  footerCoffee.classList.remove('yz-hop');
+  void footerCoffee.offsetWidth;
+  footerCoffee.classList.add('yz-hop');
+  requestAnimationFrame(() => promoBubble?.classList.add('yz-on'));
+  window.setTimeout(() => promoBubble?.classList.remove('yz-on'), 5200);
+  promoShown += 1;
+}
+
+if (footerCoffee && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+  footerCoffee.classList.add('yz-idle');
+  window.__yzPromo = showPromoBubble;
+  const schedulePromo = (delay) => window.setTimeout(() => {
+    showPromoBubble();
+    if (promoShown < 3) schedulePromo(90000 + Math.random() * 90000);
+  }, delay);
+  schedulePromo(18000 + Math.random() * 12000);
+}
