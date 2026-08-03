@@ -1,0 +1,8 @@
+# Local OpenSpec notes and exploratory image-analysis outputs.
+/AGENTS.md
+/CLAUDE.md
+/.claude/
+/openspec/
+/ref-images/
+/remove_watermark.py
+/test_*.png

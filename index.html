@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>洗圖間｜Gemini 圖片清理工具</title>
+  <meta name="description" content="在瀏覽器本機清理 Gemini 圖片的可見星形浮水印。圖片不上傳，支援 JPG、PNG、WebP 與批次下載。">
+  <meta name="theme-color" content="#f4efe7">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="洗圖間｜把圖留給你，水印交給我">
+  <meta property="og:description" content="純瀏覽器本機處理的 Gemini 圖片清理工具，支援批次預覽與 ZIP 下載。">
+  <meta property="og:url" content="https://yazelin.github.io/gemini-watermark-cleaner/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%232b6254'/%3E%3Cpath d='M32 10c2 13 9 20 22 22-13 2-20 9-22 22-2-13-9-20-22-22 13-2 20-9 22-22Z' fill='%23f4efe7'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="./" aria-label="洗圖間首頁">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>
+          <strong>洗圖間</strong>
+          <small>IMAGE CLEANROOM</small>
+        </span>
+      </a>
+      <nav class="site-nav" aria-label="主要連結">
+        <a href="https://yazelin.github.io/j303/" target="_blank" rel="noopener">LINE 實作營</a>
+        <a href="https://github.com/yazelin" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero shell">
+      <div class="eyebrow"><span class="eyebrow-dot"></span>瀏覽器本機處理 · 圖片不上傳</div>
+      <h1>把圖留給你，<em>水印交給我。</em></h1>
+      <p class="hero-copy">給 Gemini 生成圖片一個乾淨的收尾。選好圖片，剩下的像素整理在你的裝置上完成。</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="#workspace">開始清理圖片 <span aria-hidden="true">↓</span></a>
+        <a class="button button-link" href="https://yazelin.github.io/j303/" target="_blank" rel="noopener">一起做出能上線的作品 <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace shell" aria-labelledby="workspace-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">01 / CLEAN YOUR IMAGES</p>
+          <h2 id="workspace-title">把圖片放進來</h2>
+        </div>
+        <p class="section-note">支援 JPG、PNG、WebP · 單張最大 20 MB</p>
+      </div>
+
+      <div id="uploadArea" class="upload-card" tabindex="0" role="button" aria-controls="fileInput" aria-label="選擇或拖曳圖片">
+        <div class="upload-glow" aria-hidden="true"></div>
+        <div class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M24 34V10m0 0-8 8m8-8 8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M10 27v7a4 4 0 0 0 4 4h20a4 4 0 0 0 4-4v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>選擇或拖曳圖片</h3>
+        <p>一次可以放入多張，全部在本機完成處理</p>
+        <span class="upload-hint">點擊選擇檔案</span>
+        <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+      </div>
+
+      <div class="feature-strip" aria-label="工具特色">
+        <div class="feature-item"><span class="feature-icon">◎</span><div><strong>不出裝置</strong><small>沒有後端上傳</small></div></div>
+        <div class="feature-item"><span class="feature-icon">↗</span><div><strong>批次處理</strong><small>一次整理多張圖片</small></div></div>
+        <div class="feature-item"><span class="feature-icon">▱</span><div><strong>原尺寸輸出</strong><small>PNG / JPG 皆可下載</small></div></div>
+      </div>
+    </section>
+
+    <section id="singlePreview" class="preview-section shell is-hidden" aria-labelledby="single-title">
+      <div class="section-heading compact">
+        <div><p class="section-kicker">02 / REVIEW</p><h2 id="single-title">看一下整理前後</h2></div>
+        <button id="resetSingleBtn" class="button button-outline" type="button">重新選擇</button>
+      </div>
+      <div class="single-grid">
+        <article class="image-card">
+          <div class="image-card-head"><span>原圖</span><span id="originalInfo" class="image-meta"></span></div>
+          <button id="originalPreviewContainer" class="image-stage checkerboard" type="button" aria-label="放大檢視原圖"><canvas id="originalCanvas"></canvas></button>
+        </article>
+        <article id="processedSection" class="image-card result-card is-hidden">
+          <div class="image-card-head"><span>整理完成</span><span id="processedInfo" class="image-meta"></span></div>
+          <button id="processedPreviewContainer" class="image-stage checkerboard" type="button" aria-label="放大檢視整理後圖片"><img id="processedImage" alt="整理後圖片"></button>
+        </article>
+      </div>
+      <p id="statusMessage" class="status-message" role="status"></p>
+    </section>
+
+    <section id="multiPreview" class="batch-section shell is-hidden" aria-labelledby="batch-title">
+      <div class="section-heading compact">
+        <div><p class="section-kicker">02 / BATCH REVIEW</p><h2 id="batch-title">批次整理進度</h2></div>
+        <div class="batch-actions"><span id="progressText" class="progress-text">處理中 0/0</span><button id="downloadAllBtn" class="button button-primary is-hidden" type="button">全部下載 ZIP</button><button id="resetBatchBtn" class="button button-outline" type="button">重新選擇</button></div>
+      </div>
+      <div id="imageList" class="image-list"></div>
+    </section>
+
+    <section class="note-section shell">
+      <div class="note-card">
+        <span class="note-symbol" aria-hidden="true">✳</span>
+        <div><strong>小提醒</strong><p>這個工具處理的是圖片上的可見星形浮水印；不可見的 SynthID 等標記不在本工具範圍內。請確認你擁有圖片的使用權。</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <div><strong>洗圖間</strong><p>把時間留給創作，把收尾交給工具。</p></div>
+      <div class="footer-links">
+        <a href="https://yazelin.github.io/j303/" target="_blank" rel="noopener">LINE 實作營</a>
+        <a href="https://github.com/yazelin" target="_blank" rel="noopener">我的 GitHub</a>
+        <a href="https://www.facebook.com/yaze.lin.gm" target="_blank" rel="noopener">Facebook</a>
+        <a href="https://buymeacoffee.com/yazelin" target="_blank" rel="noopener">請我喝杯咖啡</a>
+      </div>
+      <div class="footer-bottom"><span>© 2026 林亞澤</span><span>MIT License · client-side only</span></div>
+    </div>
+  </footer>
+
+  <div id="previewModal" class="preview-modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <button id="closePreview" class="modal-close" type="button" aria-label="關閉預覽">×</button>
+    <div class="modal-content"><img id="modalImage" alt="放大預覽"></div>
+    <div id="modalTitle" class="modal-title"></div>
+    <p class="modal-help">左右鍵切換原圖 / 結果 · Esc 關閉</p>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay is-hidden" aria-live="polite"><div class="loading-box"><span class="spinner"></span><p id="loadingText">準備圖片中…</p></div></div>
+
+  <script src="vendor/jszip.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
