@@ -13,10 +13,14 @@ const fileInput = document.getElementById('fileInput');
 const singlePreview = document.getElementById('singlePreview');
 const multiPreview = document.getElementById('multiPreview');
 const originalCanvas = document.getElementById('originalCanvas');
+const originalName = document.getElementById('originalName');
 const originalInfo = document.getElementById('originalInfo');
 const processedSection = document.getElementById('processedSection');
 const processedImage = document.getElementById('processedImage');
+const processedName = document.getElementById('processedName');
 const processedInfo = document.getElementById('processedInfo');
+const processedStatus = document.getElementById('processedStatus');
+const downloadSingleBtn = document.getElementById('downloadSingleBtn');
 const statusMessage = document.getElementById('statusMessage');
 const imageList = document.getElementById('imageList');
 const progressText = document.getElementById('progressText');
@@ -198,9 +202,60 @@ function setStatus(message, isError = false) {
   statusMessage.style.color = isError ? '#a34f36' : '';
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '未知大小';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = units[0];
+  for (let index = 0; value >= 1024 && index < units.length - 1; index += 1) {
+    value /= 1024;
+    unit = units[index + 1];
+  }
+  const digits = value >= 10 || unit === 'KB' ? 0 : 1;
+  return `${value.toFixed(digits)} ${unit}`;
+}
+
+function formatType(file) {
+  const type = file?.type?.split('/')[1]?.toUpperCase();
+  return type === 'JPEG' ? 'JPG' : type || '圖片';
+}
+
+function formatDimensions(width, height) {
+  return `${width.toLocaleString()} × ${height.toLocaleString()} px`;
+}
+
+function formatOriginalInfo(item) {
+  const width = item.image?.naturalWidth || item.width;
+  const height = item.image?.naturalHeight || item.height;
+  return `${formatDimensions(width, height)} · ${formatType(item.file)} · ${formatBytes(item.file.size)}`;
+}
+
+function formatProcessedInfo(item) {
+  const sizeChange = item.file.size ? ` · 原檔 ${formatBytes(item.file.size)}` : '';
+  return `${formatDimensions(item.canvas.width, item.canvas.height)} · PNG · ${formatBytes(item.blob.size)}${sizeChange}`;
+}
+
+function releaseItemUrls(items) {
+  items.forEach((item) => {
+    ['originalUrl', 'processedUrl'].forEach((key) => {
+      if (item[key]) URL.revokeObjectURL(item[key]);
+      item[key] = null;
+    });
+  });
+}
+
 function updateProgress() {
   const completed = state.items.filter((item) => item.status === 'completed').length;
-  progressText.textContent = `處理中 ${completed}/${state.items.length}`;
+  const finished = state.items.filter((item) => ['completed', 'error'].includes(item.status)).length;
+  const failed = state.items.filter((item) => item.status === 'error').length;
+  if (finished === state.items.length && failed) {
+    progressText.textContent = `完成 ${completed}/${state.items.length} · ${failed} 張失敗`;
+  } else if (finished === state.items.length) {
+    progressText.textContent = `全部完成 ${completed}/${state.items.length}`;
+  } else {
+    progressText.textContent = `處理中 ${completed}/${state.items.length}`;
+  }
   downloadAllBtn.classList.toggle('is-hidden', completed === 0);
 }
 
@@ -241,12 +296,22 @@ function downloadBlob(blob, filename) {
 
 function reset() {
   state.batchRun += 1;
+  releaseItemUrls(state.items);
   state.items = [];
   state.activeItem = null;
   fileInput.value = '';
   singlePreview.classList.add('is-hidden');
   multiPreview.classList.add('is-hidden');
   processedSection.classList.add('is-hidden');
+  originalCanvas.width = 1;
+  originalCanvas.height = 1;
+  originalName.textContent = '';
+  originalInfo.textContent = '';
+  processedImage.removeAttribute('src');
+  processedName.textContent = '';
+  processedInfo.textContent = '';
+  processedStatus.textContent = '處理完成';
+  downloadSingleBtn.classList.add('is-hidden');
   imageList.replaceChildren();
   setStatus('');
   downloadAllBtn.classList.add('is-hidden');
@@ -262,16 +327,21 @@ function createBatchItem(item) {
   thumb.className = 'batch-thumb';
   const image = document.createElement('img');
   image.alt = item.file.name;
+  image.src = item.originalUrl;
   thumb.appendChild(image);
 
   const info = document.createElement('div');
   info.className = 'batch-info';
   const title = document.createElement('strong');
   title.textContent = item.file.name;
+  const meta = document.createElement('div');
+  meta.className = 'batch-meta';
+  meta.textContent = `${formatType(item.file)} · ${formatBytes(item.file.size)}`;
   const status = document.createElement('div');
   status.className = 'batch-status';
   status.textContent = '等待處理…';
-  info.append(title, status);
+  info.append(title, meta, status);
+  item.batchMeta = meta;
 
   const button = document.createElement('button');
   button.className = 'button button-primary batch-download is-hidden';
@@ -294,6 +364,8 @@ function setBatchStatus(item, message, done = false) {
 async function processItem(item) {
   try {
     item.image = await decodeFile(item.file);
+    item.width = item.image.naturalWidth;
+    item.height = item.image.naturalHeight;
     const result = await engine.process(item.image);
     item.canvas = result.canvas;
     item.removed = result.removed;
@@ -310,31 +382,48 @@ async function processItem(item) {
   }
 }
 
-async function processSingle(item) {
+async function processSingle(item, runId) {
   setLoading(true, '正在整理圖片…');
+  downloadSingleBtn.classList.add('is-hidden');
+  processedStatus.textContent = '整理中…';
+  const isCurrent = () => runId === state.batchRun && state.activeItem === item;
   try {
     await engineReady;
+    if (!isCurrent()) return;
     item.image = await decodeFile(item.file);
+    if (!isCurrent()) return;
+    item.width = item.image.naturalWidth;
+    item.height = item.image.naturalHeight;
     originalCanvas.width = item.image.naturalWidth;
     originalCanvas.height = item.image.naturalHeight;
     originalCanvas.getContext('2d').drawImage(item.image, 0, 0);
-    originalInfo.textContent = `${item.image.naturalWidth} × ${item.image.naturalHeight} px`;
+    originalName.textContent = item.file.name;
+    originalName.title = item.file.name;
+    originalInfo.textContent = formatOriginalInfo(item);
     const result = await engine.process(item.image);
+    if (!isCurrent()) return;
     item.canvas = result.canvas;
     item.removed = result.removed;
     item.detection = result.detection;
     item.blob = await canvasToBlob(result.canvas, 'image/png');
+    if (!isCurrent()) return;
     item.processedUrl = URL.createObjectURL(item.blob);
     item.status = 'completed';
     processedImage.src = item.processedUrl;
+    processedName.textContent = `cleaned_${baseName(item.file.name)}.png`;
+    processedName.title = processedName.textContent;
+    processedInfo.textContent = formatProcessedInfo(item);
+    processedStatus.textContent = result.removed ? '已整理可見水印' : '未偵測到水印';
+    downloadSingleBtn.classList.remove('is-hidden');
     processedSection.classList.remove('is-hidden');
-    processedInfo.textContent = result.removed ? '可見浮水印已整理' : '未偵測到可見浮水印';
     setStatus(result.removed ? '完成：只在圖片的星形水印區域做像素整理。' : '這張圖片沒有偵測到可見的星形水印，已保留原圖。');
   } catch (error) {
+    if (!isCurrent()) return;
     console.error(error);
+    processedStatus.textContent = '處理失敗';
     setStatus('圖片處理失敗，請換一張圖片再試。', true);
   } finally {
-    setLoading(false);
+    if (isCurrent()) setLoading(false);
   }
 }
 
@@ -344,10 +433,15 @@ async function processBatch(items, runId) {
     if (runId !== state.batchRun) return;
     setBatchStatus(item, '處理中…');
     await processItem(item);
+    if (runId !== state.batchRun) {
+      releaseItemUrls([item]);
+      return;
+    }
     if (item.status === 'completed') {
       const row = document.querySelector(`[data-id="${item.id}"]`);
       const image = row?.querySelector('img');
       if (image) image.src = item.processedUrl;
+      if (item.batchMeta) item.batchMeta.textContent = `${formatDimensions(item.width, item.height)} · ${formatType(item.file)} ${formatBytes(item.file.size)} → PNG ${formatBytes(item.blob.size)}`;
       setBatchStatus(item, item.removed ? '完成：已整理可見水印' : '完成：未偵測到可見水印', true);
     } else {
       setBatchStatus(item, '處理失敗');
@@ -384,15 +478,23 @@ function receiveFiles(fileList) {
   if (invalid.length) setStatus('部分檔案不是支援的格式，或超過 20 MB，已略過。', true);
   const valid = files.filter((file) => ACCEPTED_TYPES.has(file.type) && file.size <= MAX_FILE_SIZE);
   if (!valid.length) return;
+  releaseItemUrls(state.items);
   state.batchRun += 1;
   const runId = state.batchRun;
-  state.items = valid.map((file, index) => ({ id: `${Date.now()}-${index}`, file, status: 'pending' }));
+  state.items = valid.map((file, index) => ({
+    id: `${Date.now()}-${index}`,
+    file,
+    status: 'pending',
+    originalUrl: URL.createObjectURL(file),
+  }));
   if (valid.length === 1) {
     state.activeItem = state.items[0];
     singlePreview.classList.remove('is-hidden');
     multiPreview.classList.add('is-hidden');
     processedSection.classList.add('is-hidden');
-    processSingle(state.activeItem);
+    processedImage.removeAttribute('src');
+    processedStatus.textContent = '處理中…';
+    processSingle(state.activeItem, runId);
   } else {
     singlePreview.classList.add('is-hidden');
     multiPreview.classList.remove('is-hidden');
@@ -434,6 +536,7 @@ document.getElementById('processedPreviewContainer').addEventListener('click', (
 document.getElementById('closePreview').addEventListener('click', closeModal);
 previewModal.addEventListener('click', (event) => { if (event.target === previewModal) closeModal(); });
 downloadAllBtn.addEventListener('click', downloadAll);
+downloadSingleBtn.addEventListener('click', () => downloadItem(state.activeItem));
 resetSingleBtn.addEventListener('click', reset);
 resetBatchBtn.addEventListener('click', reset);
 document.addEventListener('keydown', (event) => {

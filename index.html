@@ -78,12 +78,25 @@
       </div>
       <div class="single-grid">
         <article class="image-card">
-          <div class="image-card-head"><span>原圖</span><span id="originalInfo" class="image-meta"></span></div>
+          <div class="image-card-head"><span>原圖</span><span class="image-card-hint">點擊圖片可放大</span></div>
           <button id="originalPreviewContainer" class="image-stage checkerboard" type="button" aria-label="放大檢視原圖"><canvas id="originalCanvas"></canvas></button>
+          <div class="image-card-footer">
+            <div class="image-details">
+              <strong id="originalName" class="image-file-name"></strong>
+              <span id="originalInfo" class="image-meta"></span>
+            </div>
+          </div>
         </article>
         <article id="processedSection" class="image-card result-card is-hidden">
-          <div class="image-card-head"><span>整理完成</span><span id="processedInfo" class="image-meta"></span></div>
+          <div class="image-card-head"><span>整理完成</span><span id="processedStatus" class="status-pill">處理完成</span></div>
           <button id="processedPreviewContainer" class="image-stage checkerboard" type="button" aria-label="放大檢視整理後圖片"><img id="processedImage" alt="整理後圖片"></button>
+          <div class="image-card-footer">
+            <div class="image-details">
+              <strong id="processedName" class="image-file-name"></strong>
+              <span id="processedInfo" class="image-meta"></span>
+            </div>
+            <button id="downloadSingleBtn" class="button button-primary" type="button"><span aria-hidden="true">↓</span> 下載整理後圖片</button>
+          </div>
         </article>
       </div>
       <p id="statusMessage" class="status-message" role="status"></p>
